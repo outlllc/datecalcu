@@ -52,9 +52,27 @@ class BabyWeight : BaseFragmentDataBinding<FragmentBabyWeightBinding>() {
         viewModel.clearTrigger.observe(viewLifecycleOwner) {
             clearAllInputs()
         }
+
+        viewModel.isEarlyPregnancyMode.observe(viewLifecycleOwner) { isEarly ->
+            if (isEarly) {
+                binding.llStandardBiometrics.visibility = View.GONE
+                binding.llEarlyPregnancyBiometrics.visibility = View.VISIBLE
+            } else {
+                binding.llStandardBiometrics.visibility = View.VISIBLE
+                binding.llEarlyPregnancyBiometrics.visibility = View.GONE
+            }
+        }
     }
 
     private fun setupListeners() {
+        binding.tvLabelPregnancyWeek.setOnClickListener {
+            viewModel.toggleMode()
+        }
+
+        binding.tvLabelBack.setOnClickListener {
+            viewModel.toggleMode()
+        }
+
         binding.btnCompare.setOnClickListener {
             hideKeyboard()
             viewModel.performCalculations(
@@ -67,7 +85,12 @@ class BabyWeight : BaseFragmentDataBinding<FragmentBabyWeightBinding>() {
                 tibiaStr = binding.etTibia.text.toString(),
                 weekStr = binding.etPregnancyWeek.text.toString(),
                 lmpStr = binding.LMP.text.toString(),
-                inspectStr = binding.etInspectionDate.text.toString()
+                inspectStr = binding.etInspectionDate.text.toString(),
+                gsAvgStr = binding.etGSAvg.text.toString(),
+                gs1Str = binding.etGS1.text.toString(),
+                gs2Str = binding.etGS2.text.toString(),
+                gs3Str = binding.etGS3.text.toString(),
+                crlStr = binding.etCRL.text.toString()
             )
         }
 

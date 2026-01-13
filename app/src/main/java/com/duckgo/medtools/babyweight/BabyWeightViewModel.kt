@@ -8,8 +8,10 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class BabyWeightViewModel(application: Application) : AndroidViewModel(application) {
@@ -29,10 +31,34 @@ class BabyWeightViewModel(application: Application) : AndroidViewModel(applicati
     private val _clearTrigger = MutableLiveData<Unit>()
     val clearTrigger: LiveData<Unit> = _clearTrigger
 
+    private val _isEarlyPregnancyMode = MutableLiveData<Boolean>(false)
+    val isEarlyPregnancyMode: LiveData<Boolean> = _isEarlyPregnancyMode
+
+    private var earlyPregnancyData: JSONArray? = null
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             repo.loadFromAssets("growproperty.json")
+            loadEarlyPregnancyData()
         }
+    }
+
+    private fun loadEarlyPregnancyData() {
+        try {
+            val inputStream = getApplication<Application>().assets.open("early_pregnancy_ga.json")
+            val size = inputStream.available()
+            val buffer = ByteArray(size)
+            inputStream.read(buffer)
+            inputStream.close()
+            val jsonString = String(buffer, Charsets.UTF_8)
+            earlyPregnancyData = JSONArray(jsonString)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun toggleMode() {
+        _isEarlyPregnancyMode.value = !(_isEarlyPregnancyMode.value ?: false)
     }
 
     fun performCalculations(
@@ -45,9 +71,19 @@ class BabyWeightViewModel(application: Application) : AndroidViewModel(applicati
         tibiaStr: String,
         weekStr: String,
         lmpStr: String,
-        inspectStr: String
+        inspectStr: String,
+        gsAvgStr: String = "",
+        gs1Str: String = "",
+        gs2Str: String = "",
+        gs3Str: String = "",
+        crlStr: String = ""
     ) {
         viewModelScope.launch {
+            if (_isEarlyPregnancyMode.value == true) {
+                calculateEarlyPregnancy(gsAvgStr, gs1Str, gs2Str, gs3Str, crlStr, lmpStr, inspectStr)
+                return@launch
+            }
+
             // 1. 确定孕周逻辑：手动输入优先，否则日期计算
             var week = weekStr.toDoubleOrNull()
             if (week == null) {
@@ -81,6 +117,90 @@ class BabyWeightViewModel(application: Application) : AndroidViewModel(applicati
                     generateUserCompareReports(week, repo, inputs)
                 }
             }
+        }
+    }
+
+    private suspend fun calculateEarlyPregnancy(
+        gsAvgStr: String,
+        gs1Str: String,
+        gs2Str: String,
+        gs3Str: String,
+        crlStr: String,
+        lmpStr: String,
+        inspectStr: String
+    ) {
+        val gsAvgInput = gsAvgStr.toDoubleOrNull()
+        val gs1 = gs1Str.toDoubleOrNull()
+        val gs2 = gs2Str.toDoubleOrNull()
+        val gs3 = gs3Str.toDoubleOrNull()
+        val crl = crlStr.toDoubleOrNull()
+
+        val gsAvg = gsAvgInput ?: if (gs1 != null && gs2 != null && gs3 != null) {
+            (gs1 + gs2 + gs3) / 3.0
+        } else null
+
+        val results = mutableListOf<String>()
+
+        // 首先计算日期对应的孕周
+        val weekFromDates = calculateWeekFromDates(lmpStr, inspectStr)
+        if (weekFromDates != null) {
+            val totalDays = (weekFromDates * 7).roundToInt()
+            val weeks = totalDays / 7
+            val remainingDays = totalDays % 7
+            results.add("日期计算孕周：\n${weeks}周${remainingDays}天")
+        }
+
+        if (gsAvg != null) {
+            val gaGs = findGAByValue(gsAvg, "gs")
+            results.add("妊娠囊均值(%.1fmm) 预测妊娠龄：\n$gaGs".format(gsAvg))
+        }
+        if (crl != null) {
+            val gaCrl = findGAByValue(crl, "crl")
+            results.add("顶臀长(%.1fmm) 预测妊娠龄：\n$gaCrl".format(crl))
+        }
+
+        if (results.isEmpty()) {
+            _predictedWeight.value = "请输入日期、妊娠囊或顶臀长"
+        } else {
+            _predictedWeight.value = results.joinToString("\n\n")
+        }
+        _percentileReports.value = emptyList()
+    }
+
+    private fun findGAByValue(value: Double, field: String): String {
+        val data = earlyPregnancyData ?: return "数据加载中..."
+        var bestMatch: org.json.JSONObject? = null
+        var minDiff = Double.MAX_VALUE
+        var minValInTable = Double.MAX_VALUE
+        var maxValInTable = -Double.MAX_VALUE
+        var hasValidField = false
+
+        for (i in 0 until data.length()) {
+            val item = data.getJSONObject(i)
+            if (item.isNull(field)) continue
+            
+            hasValidField = true
+            val tableValue = item.getDouble(field)
+            if (tableValue < minValInTable) minValInTable = tableValue
+            if (tableValue > maxValInTable) maxValInTable = tableValue
+
+            val diff = abs(tableValue - value)
+            if (diff < minDiff) {
+                minDiff = diff
+                bestMatch = item
+            }
+        }
+
+        if (!hasValidField || value < minValInTable || value > maxValInTable) {
+            return "不在计算范围"
+        }
+
+        return if (bestMatch != null) {
+            val days = bestMatch.getInt("days")
+            val weeks = bestMatch.getDouble("weeks")
+            "${weeks}周 (${days}天)"
+        } else {
+            "未找到对应数值"
         }
     }
 
