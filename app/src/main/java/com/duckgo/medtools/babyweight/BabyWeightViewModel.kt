@@ -59,6 +59,7 @@ class BabyWeightViewModel(application: Application) : AndroidViewModel(applicati
 
     fun toggleMode() {
         _isEarlyPregnancyMode.value = !(_isEarlyPregnancyMode.value ?: false)
+        _predictedWeight.value = ""
     }
 
     fun performCalculations(
@@ -100,9 +101,18 @@ class BabyWeightViewModel(application: Application) : AndroidViewModel(applicati
             val tibia = tibiaStr.toDoubleOrNull()
 
             // 3. 预测体重
-            _predictedWeight.value = withContext(Dispatchers.Default) {
+            val prediction = withContext(Dispatchers.Default) {
                 calculatePredictionResult(ac, fl, bpd)
             }
+            
+            val gaInfo = if (week != null) {
+                val totalDays = (week * 7).roundToInt()
+                val weeks = totalDays / 7
+                val remainingDays = totalDays % 7
+                "当前孕周：${weeks}周${remainingDays}天\n"
+            } else ""
+            
+            _predictedWeight.value = gaInfo + prediction
 
             // 4. 生成报告
             if (week == null) {
